@@ -1,0 +1,9 @@
+# Live application data (real clients, projects, payments). Never commit.
+server/data/
+
+# Local environment files
+.env
+.env.*
+
+# Allow the example env file
+!.env.example

@@ -1,4 +1,5 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import path from 'path';
@@ -36,15 +37,25 @@ router.get('/health', (req: Request, res: Response) => {
 });
 
 // --- AUTHENTICATION (Intouch) ---
-// Common Admin Login (Password: 1234)
+// Admin password and token secret come from the environment (server/.env).
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!ADMIN_PASSWORD || !JWT_SECRET) {
+  console.warn('[Auth] ADMIN_PASSWORD and JWT_SECRET must be set in server/.env. Login is disabled until they are.');
+}
+
 router.post('/auth/login', (req: Request, res: Response) => {
   const { password } = req.body;
 
-  if (password !== '1234') {
-    return res.status(401).json({ error: 'Invalid password. Admin password is "1234".' });
+  if (!ADMIN_PASSWORD || !JWT_SECRET) {
+    return res.status(503).json({ error: 'Login is not configured on the server.' });
   }
 
-  const token = 'intouch-token-' + Date.now() + '-' + Math.random().toString(36).substring(2);
+  if (typeof password !== 'string' || password !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid password.' });
+  }
+
+  const token = jwt.sign({ role: 'Admin' }, JWT_SECRET, { expiresIn: '12h' });
 
   res.json({
     token,
@@ -56,11 +67,21 @@ router.post('/auth/login', (req: Request, res: Response) => {
   });
 });
 
-router.get('/auth/me', (req: Request, res: Response) => {
+// Every route registered after this point requires a valid Bearer token.
+router.use((req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!JWT_SECRET || !authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
+  try {
+    jwt.verify(authHeader.slice('Bearer '.length), JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+});
+
+router.get('/auth/me', (req: Request, res: Response) => {
   res.json({ authenticated: true, app: 'Intouch' });
 });
 
